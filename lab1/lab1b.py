@@ -1,12 +1,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from scipy.signal import savgol_filter
 
 
 def generate_data(n=6):
     '''Returns patterns and targets in shape with a column for each sample. Also adds column for bias term'''
-    # mA = [3.0, 0.5]
-    # mB = [-3.0, 0.5]
     ratio = 0.5  # propotion of samples of class A
     size_A = int(n * ratio)
     size_B = n - size_A
@@ -17,8 +16,6 @@ def generate_data(n=6):
         mB, np.diag([sigmaB, sigmaB]), size=size_B)
 
     patterns = np.c_[np.concatenate((class_A, class_B)), np.ones(n)]
-    if REMOVE_BIAS:
-        patterns = np.concatenate((class_A, class_B))
     targets = np.concatenate(
         ([-1 for _ in range(size_A)], [1 for _ in range(size_B)]))
 
@@ -29,10 +26,6 @@ def generate_data(n=6):
 
 def generate_splitted_data(n=6):
     '''Returns patterns and targets in shape with a column for each sample. Also adds column for bias term'''
-    # mA = [4.0, 0.5]
-    # mB = [-4.0, 0.5]
-    # sigmaA = 0.5
-    # sigmaB = 0.5
     ratio = 0.5  # propotion of samples of class A
     size_A = int(n * ratio)
     size_A1 = size_A // 2
@@ -51,8 +44,6 @@ def generate_splitted_data(n=6):
         mB, np.diag([sigmaB, sigmaB]), size=size_B)
 
     patterns = np.c_[np.concatenate((class_A, class_B)), np.ones(n)]
-    if REMOVE_BIAS:
-        patterns = np.concatenate((class_A, class_B))
     targets = np.concatenate(
         ([-1 for _ in range(size_A)], [1 for _ in range(size_B)]))
 
@@ -64,27 +55,19 @@ def generate_splitted_data(n=6):
 def create_batches(batch_size, patterns, targets):
     idx = 0
     batches = []
-    input_size = patterns.shape[1]
+    input_size = len(targets)
     while idx < input_size:
         if idx + batch_size > input_size - 1:
-            end = input_size - 1
+            end = input_size  # * was input_size -1 before
             next_idx = input_size
         else:
             end = idx + batch_size
             next_idx = end
-
         batch = [patterns[:, idx:end],
                  targets[idx: end]]
         batches.append(batch)
         idx = next_idx
     return batches
-
-
-def perceptron_learning(patterns, targets, weights):
-    weighted_sum = np.dot(weights, patterns)
-    prediction = np.where(weighted_sum > 0, 1.0, -1.0)
-    e = (targets - prediction)[np.newaxis, :]
-    return e
 
 
 def delta_rule(patterns, targets, weights):
@@ -94,68 +77,170 @@ def delta_rule(patterns, targets, weights):
     return e
 
 
-def plt_data(patterns, targets):
+def plt_data(patterns, targets, val_data):
     class_A_indices = np.where(targets == -1)[0]
     class_B_indices = np.where(targets == 1)[0]
-
     patterns_A = patterns[:, class_A_indices]
     patterns_B = patterns[:, class_B_indices]
-    plt.subplot(1, 2, 1)
-    plt.scatter(patterns_A[0, :], patterns_A[1, :], s=2, label='Class A')
-    plt.scatter(patterns_B[0, :], patterns_B[1, :], s=2, label='Class B')
-    # plt.legend()
+
+    if val_data != None:
+        val_patterns, val_targets = val_data
+        val_class_A_indices = np.where(val_targets == -1)[0]
+        val_class_B_indices = np.where(val_targets == 1)[0]
+        val_patterns_A = val_patterns[:, val_class_A_indices]
+        val_patterns_B = val_patterns[:, val_class_B_indices]
+
+    plt.subplot(1, 3, 1)
+    plt.scatter(patterns_A[0, :], patterns_A[1, :],
+                s=2, label='Class A', color="blue")
+    plt.scatter(patterns_B[0, :], patterns_B[1, :],
+                s=2, label='Class B', color="red")
+    if val_data != None:
+        plt.scatter(val_patterns_A[0, :], val_patterns_A[1,
+                    :], s=12, label='Val Class A', marker='x', color="blue")
+        plt.scatter(val_patterns_B[0, :], val_patterns_B[1,
+                    :], s=12, label='Val Class B', marker='x', color="red")
+        # plt.legend()
 
 
-def plt_accs(delt_accuracy_train, delt_accuracy_val):
-    plt.subplot(1, 2, 2)
-    plt.plot(delt_accuracy_train, label='Seq Train Accuracy')
+def plt_accs(accs, batch_accs):
+    seq_acc_train, seq_acc_val = accs
+
+    sav_window_length = 7
+    sav_polyorder = 2
+
+    # Smooth the lines using the Savitzky-Golay filter
+    seq_smooth = savgol_filter(
+        seq_acc_train, sav_window_length, sav_polyorder)
+    seq_val_smooth = savgol_filter(
+        seq_acc_val, sav_window_length, sav_polyorder)
+
+    if batch_accs != None:
+        batch_acc_train, batch_acc_val = batch_accs
+        batch_smooth = savgol_filter(
+            batch_acc_train, sav_window_length, sav_polyorder)
+        batch_val_smooth = savgol_filter(
+            batch_acc_val, sav_window_length, sav_polyorder)
+
+    plt.subplot(1, 3, 2)
+    plt.plot(seq_smooth, label='seq-train', color='blue')
+    if batch_accs != None:
+        plt.plot(batch_smooth, label='batch-train', color='red')
     if PLOT_VAL:
-        plt.plot(delt_accuracy_val, label='Seq Validation Accuracy')
+        plt.plot(seq_val_smooth, label='seq-val',
+                 color='blue', linestyle='--', alpha=0.25)
+        plt.plot(batch_val_smooth, label='batch-val',
+                 color='red', linestyle='--', alpha=0.25)
 
     plt.xlabel("Epoch")
     plt.ylabel("Accuracy")
-    # plt.title("Test and Validation Accuracy for Delta Rule")
+    plt.title("Accuracy")
     plt.legend()
 
 
-def plt_mses(p_mses, d_mses, fd_mses):
-    plt.plot(p_mses, label='Perc')
-    plt.plot(d_mses, label='Delta-Seq')
-    plt.plot(fd_mses, label='Delta-Batch')
-    plt.title("MSE for delta and perceptron rule")
+def plt_mses(mse, mse_batch):
+    sav_window_length = 7
+    sav_polyorder = 2
+
+    seq, seq_val = mse
+    if mse_batch != None:
+        batch, batch_val = mse_batch
+        batch_smooth = savgol_filter(
+            batch, sav_window_length, sav_polyorder)
+        batch_val_smooth = savgol_filter(
+            batch_val, sav_window_length, sav_polyorder)
+
+    # Smooth the lines using the Savitzky-Golay filter
+    seq_smooth = savgol_filter(
+        seq, sav_window_length, sav_polyorder)
+    seq_val_smooth = savgol_filter(
+        seq_val, sav_window_length, sav_polyorder)
+
+    plt.subplot(1, 3, 3)
+    plt.plot(seq_smooth, label='seq (smoothed)', color='blue')
+    if mse_batch != None:
+        plt.plot(batch_smooth, label='batch (smoothed)', color='red')
+    if PLOT_VAL:
+        plt.plot(seq_val_smooth, label='seq-val (smoothed)',
+                 color='blue', linestyle='--', alpha=0.25)
+        plt.plot(batch_val_smooth, label='batch-val (smoothed)',
+                 color='red', linestyle='--', alpha=0.25)
+
+    plt.title("MSE")
 
     plt.legend()
 
 
-def plot_decision_boundary(i, patterns, targets, weights_delt, delt_accuracy_train, delt_accuracy_val):
+def plot_gaussian(i, patterns, targets, seq_model):
+    W, V, accs, mses = seq_model
 
-    W_delt = weights_delt[i, :]
+    x_test = np.linspace(-5, 5, GRID_SIZE)
+    y_test = np.linspace(-5, 5, GRID_SIZE)
+
+    xy = np.array(np.meshgrid(x_test, y_test))
+    x_test = xy[0].reshape((GRID_SIZE * GRID_SIZE, 1))
+    y_test = xy[1].reshape((GRID_SIZE * GRID_SIZE, 1))
+
+    patterns_test = np.stack((x_test, y_test)).T[0]  # (N,2)
+    patterns_test = np.c_[patterns_test, np.ones(len(x_test))].T
+
+    W = W[i, :]
+    V = V[i, :]
+
+    _, _, _, z_delt = forward(patterns_test, W, V)
+
+    x = x_test.reshape((GRID_SIZE, GRID_SIZE))
+    y = y_test.reshape((GRID_SIZE, GRID_SIZE))
+    z = z_delt.reshape((GRID_SIZE, GRID_SIZE))
+
+    plt.clf()
+    fig = plt.gcf()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.plot_surface(x, y, z, cmap='viridis', linewidth=0)
+    plt.title("Estimated guassian for epoch: " + str(i))
+
+
+def plot_decision_boundary(i, patterns, targets, val_data, seq_model, batch_model):
 
     x1, x2 = np.meshgrid(np.linspace(-10, 10, 100), np.linspace(-10, 10, 100))
 
-    if REMOVE_BIAS:
-        z_delt = W_delt[0] * x1 + W_delt[1] * x2
-    else:
-        z_delt = W_delt[0] * x1 + W_delt[1] * x2 + W_delt[2]
+    X = np.vstack((x1.ravel(), x2.ravel(), np.ones_like(x1.ravel())))
+
+    W, V, accs, mses = seq_model
+    W = W[i, :]
+    V = V[i, :]
+    _, _, _, z_delt = forward(X, W, V)
+    # Reshape the output to match the shape of the meshgrid
+    z_delt = z_delt.reshape(x1.shape)
+
+    accs_batch = None
+    mses_batch = None
+    if batch_model != None:
+        W_batch, V_batch, accs_batch, mses_batch = batch_model
+        W_batch = W_batch[i, :]
+        V_batch = V_batch[i, :]
+        _, _, _, z_delt_batch = forward(X, W_batch, V_batch)
+        z_delt_batch = z_delt_batch.reshape(x1.shape)
 
     plt.clf()
 
-    plt_data(patterns, targets)
+    plt_data(patterns, targets, val_data)
     plt_accs(
-        delt_accuracy_train, delt_accuracy_val)
+        accs, accs_batch)
+    plt_mses(mses, mses_batch)
 
-    plt.subplot(1, 2, 1)
+    plt.subplot(1, 3, 1)
     plt.scatter(0, 0, marker='x', s=100, color='red')
     plt.contourf(x1, x2, z_delt, levels=[-100, 0, 100],
                  colors=['blue', 'red'], alpha=0.1)
     plt.contour(x1, x2, z_delt, levels=[0], colors=[
-                'black'], linewidths=2, label='Seq')
+                'blue'], linewidths=2, label='Seq')
+    if batch_model != None:
+        plt.contour(x1, x2, z_delt_batch, levels=[0], colors=[
+                    'red'], linewidths=2, label='Batch')
     plt.legend()
-    plt.title("Delta Rule")
-    if REMOVE_BIAS:
-        plt.suptitle("Epoch: " + str(i + 1) + ", No Bias")
-    else:
-        plt.suptitle("Epoch: " + str(i + 1))
+    plt.title("Two Layer Perceptron")
+    plt.suptitle("Epoch: " + str(i + 1))
 
 
 def on_close(event):
@@ -163,32 +248,42 @@ def on_close(event):
     plt.close()
 
 
-def comp_mses(patterns, targets, wp, wd, fwd):
-    perc_weighted_sum = np.dot(wp, patterns)
-    mse_p = np.mean((targets - perc_weighted_sum) ** 2)
-
-    delt_weighted_sum = np.dot(wd, patterns)
-    mse_d = np.mean((targets - delt_weighted_sum) ** 2)
-
-    full_delt_weighted_sum = np.dot(fwd, patterns)
-    mse_fd = np.mean((targets - full_delt_weighted_sum) ** 2)
-
-    return mse_p, mse_d, mse_fd
-
-
-def comp_acc(patterns, targets, delta_weights):
+def comp_mses(patterns, targets, val_data, W, V):
     if SPLITTED_A:
         val_patterns, val_targets = generate_splitted_data(n=100)
     else:
         val_patterns, val_targets = generate_data(n=100)
 
+    if val_data != None:
+        val_patterns, val_targets = val_data
+
+    # train
+    _, _, _, train_weighted_sum = forward(patterns, W, V)
+    train_mse = np.mean((targets - train_weighted_sum) ** 2)
+
+    # val
+    _, _, _, val_weighted_sum = forward(val_patterns, W, V)
+    val_mse = np.mean((val_targets - val_weighted_sum) ** 2)
+
+    return train_mse, val_mse
+
+
+def comp_acc(patterns, targets, val_data, W, V):
+    if SPLITTED_A:
+        val_patterns, val_targets = generate_splitted_data(n=100)
+    else:
+        val_patterns, val_targets = generate_data(n=100)
+
+    if val_data != None:
+        val_patterns, val_targets = val_data
+
     # delta train acc
-    delt_weighted_sum = np.dot(delta_weights, patterns)
+    _, _, _, delt_weighted_sum = forward(patterns, W, V)
     delt_prediction = np.where(delt_weighted_sum > 0, 1.0, -1.0)
     delt_equal_entries = np.sum(delt_prediction == targets)
     delt_accuracy_train = delt_equal_entries / len(targets) * 100
     # delta val acc
-    val_delt_weighted_sum = np.dot(delta_weights, val_patterns)
+    _, _, _, val_delt_weighted_sum = forward(val_patterns, W, V)
     val_delt_prediction = np.where(val_delt_weighted_sum > 0, 1.0, -1.0)
     val_delt_equal_entries = np.sum(val_delt_prediction == val_targets)
     delt_accuracy_val = val_delt_equal_entries / len(val_targets) * 100
@@ -270,7 +365,9 @@ def remove_data(patterns, targets, ratio_a, ratio_b):
 
     remaining_indices = np.array(
         list(set(np.arange(targets.size)) - set(a_selected_indices) - set(b_selected_indices)))
-    return patterns[:, remaining_indices], targets[remaining_indices]
+    to_delete = np.array(
+        list(set(np.arange(targets.size)) - set(remaining_indices)))
+    return patterns[:, remaining_indices], targets[remaining_indices], to_delete
 
 
 def remove_subset_a(patterns, targets, ratio_pos, ratio_neg):
@@ -286,7 +383,7 @@ def remove_subset_a(patterns, targets, ratio_pos, ratio_neg):
     indices_to_del = np.concatenate([a_chosen_pos, a_chosen_neg])
     new_targets = np.delete(targets, indices_to_del)
     new_patterns = np.delete(patterns, indices_to_del, axis=1)
-    return new_patterns, new_targets
+    return new_patterns, new_targets, indices_to_del
 
 
 def plot_class_accuracies(class_accs):
@@ -322,26 +419,115 @@ def plot_class_accuracies(class_accs):
     plt.tight_layout()
 
 
-# Constants
-NMB_EPOCHS = 100
-ETA = 0.0005
+def activation(inp):
+    return 2. / (1 + np.exp(-inp)) - 1
+
+
+def deriv_act(inp):
+    return ((1 + inp) * (1 - inp)) * 0.5
+
+
+def forward(patterns, W, V):
+    H_in = np.dot(W, patterns)
+    H_out = activation(H_in)
+
+    # Add bias as new row
+    new_row = np.ones((1, patterns.shape[1]))
+    H_out = np.vstack((H_out, new_row))
+    O_in = np.dot(V, H_out)
+    O_out = activation(O_in)
+
+    return H_in, H_out, O_in, O_out
+
+
+def backward(H_in, H_out, O_in, O_out, V, targets):
+    delta_o = (O_out - targets) * deriv_act(O_out)
+    delta_h = (np.dot(V.T, delta_o)) * deriv_act(H_out)
+    delta_h = delta_h[:-1]
+
+    return delta_h, delta_o
+
+
+# Constants - Data Gen
 N = 100
-BATCH_SIZE = 1
-REMOVE_A = 0.0
-REMOVE_B = 0.0
-REMOVE_POS = 0.2
-REMOVE_NEG = 0.8
 mA = [1.0, 0.3]  # mean class A
 mB = [0.0, -0.1]  # mean class B
 sigmaA = 0.2
 sigmaB = 0.3
-REMOVE_BIAS = False
-SPLITTED_A = False
+REMOVE_A = 0.
+REMOVE_B = 0.
+REMOVE_POS = 0.2
+REMOVE_NEG = 0.8
+SPLITTED_A = True
+REMOVE_DATA = True
 PLOT_VAL = False
-REMOVE_DATA = False
 
 
-def main():
+# Constants - Training
+NMB_NODES = 16
+NMB_EPOCHS = 100
+ETA = 0.001
+BATCH_SIZE = 900
+ALPHA = 0.9
+
+# Constants - other
+ANIMATE = True
+GRID_SIZE = 30
+
+
+def gaussian(xy):
+    return np.exp(-(xy[0]**2 + xy[1]**2) / 10) - 0.5
+
+
+def generate_gauss_data(min=-5, max=5):
+    grid = np.linspace(min, max, GRID_SIZE)
+    xy = np.meshgrid(grid, grid)
+    z = gaussian(xy)
+    x = xy[0]
+    y = xy[1]
+
+    # plot_gaussian(x, y, z)
+
+    x = x.reshape((GRID_SIZE * GRID_SIZE, 1))
+    y = y.reshape((GRID_SIZE * GRID_SIZE, 1))
+    z = z.reshape((GRID_SIZE * GRID_SIZE))
+
+    patterns = np.stack((x, y)).T[0]  # (N,2)
+    patterns = np.c_[patterns, np.ones(len(x))]
+    p = np.random.permutation(len(patterns))
+
+    targets = z
+
+    return patterns[p].T, targets[p].T
+
+
+def function_approx():
+    patterns, targets = generate_gauss_data()
+    # Initialize weights
+    W = np.zeros((NMB_EPOCHS, NMB_NODES, 3))
+    W[0, :] = np.random.normal(size=(NMB_NODES, 3))
+    V = np.zeros((NMB_EPOCHS, 1, NMB_NODES + 1))
+    V[0, :] = np.random.normal(size=(1, NMB_NODES + 1))
+
+    # Train and validate the model using sequential mode (if batchsize == 1)
+    seq_batches = create_batches(BATCH_SIZE, patterns, targets)
+    seq_accs, seq_mses = train_model(
+        patterns, targets, None, seq_batches, W, V)
+    seq_model = (W, V, seq_accs, seq_mses)
+
+    # Plot the decision boundary
+    if ANIMATE:
+        ani = FuncAnimation(plt.gcf(), plot_gaussian,
+                            frames=NMB_EPOCHS, repeat=False, fargs=(patterns, targets, seq_model))
+        plt.gcf().canvas.mpl_connect(ani, on_close)
+    else:
+        plot_gaussian(NMB_EPOCHS - 1, patterns,
+                      targets, seq_model)
+
+    plt.show()
+
+
+def two_layer_perceptron():
     # Generate data
     if SPLITTED_A:
         patterns, targets = generate_splitted_data(n=N)
@@ -350,67 +536,105 @@ def main():
 
     # Preprocessing
     if REMOVE_DATA:
-        patterns, targets = remove_data(patterns, targets, REMOVE_A, REMOVE_B)
-        patterns, targets = remove_subset_a(
-            patterns, targets, REMOVE_POS, REMOVE_NEG)
+        rem_patterns, rem_targets, remaining_indices1 = remove_data(
+            patterns, targets, REMOVE_A, REMOVE_B)
+        rem_patterns, rem_targets, remaining_indices2 = remove_subset_a(
+            rem_patterns, rem_targets, REMOVE_POS, REMOVE_NEG)
 
-    # Create batches
-    batches = create_batches(BATCH_SIZE, patterns, targets)
+        if remaining_indices1.size == 0:
+            remaining_indices = remaining_indices2
+        else:
+            remaining_indices = np.concatenate(
+                (remaining_indices1, remaining_indices2))
+        hold_patterns = patterns[:, remaining_indices]
+        hold_targets = targets[remaining_indices]
+        val_data = [hold_patterns, hold_targets]
 
+        patterns = rem_patterns
+        targets = rem_targets
+        print(patterns.shape)
+        print(targets.shape)
     # Initialize weights
-    weights_delt = np.zeros((NMB_EPOCHS, 3))
-    weights_delt[0, :] = np.random.normal(size=(3,))
-    if REMOVE_BIAS:
-        weights_delt = np.zeros((NMB_EPOCHS, 2))
-        weights_delt[0, :] = np.random.normal(size=(2,))
+    W = np.zeros((NMB_EPOCHS, NMB_NODES, 3))
+    W[0, :] = np.random.normal(size=(NMB_NODES, 3))
+    V = np.zeros((NMB_EPOCHS, 1, NMB_NODES + 1))
+    V[0, :] = np.random.normal(size=(1, NMB_NODES + 1))
+    W_batch = np.copy(W)
+    V_batch = np.copy(V)
 
-    # Train and validate the model
-    delt_accs_train, delt_accs_val = train_model(
-        patterns, targets, batches, weights_delt)
+    # Train and validate the model using sequential mode (if batchsize == 1)
+    seq_batches = create_batches(BATCH_SIZE, patterns, targets)
+    seq_accs, seq_mses = train_model(
+        patterns, targets, val_data, seq_batches, W, V)
+
+    # Train and validate the model using batchmode
+    full_batch = create_batches(N, patterns, targets)
+    batch_accs, batch_mses = train_model(
+        patterns, targets, val_data, full_batch, W_batch, V_batch)
+
+    seq_model = (W, V, seq_accs, seq_mses)
+    batch_model = (W_batch, V_batch, batch_accs, batch_mses)
 
     # Plot the decision boundary
-    ani = FuncAnimation(plt.gcf(), plot_decision_boundary,
-                        frames=NMB_EPOCHS, repeat=False, fargs=(patterns, targets, weights_delt, delt_accs_train, delt_accs_val))
-    plt.gcf().canvas.mpl_connect(ani, on_close)
+    if ANIMATE:
+        ani = FuncAnimation(plt.gcf(), plot_decision_boundary,
+                            frames=NMB_EPOCHS, repeat=False, fargs=(patterns, targets, val_data, seq_model, batch_model))
+        plt.gcf().canvas.mpl_connect(ani, on_close)
+    else:
+        plot_decision_boundary(NMB_EPOCHS - 1, patterns,
+                               targets, val_data, seq_model, batch_model)
+
     plt.show()
 
 
-def train_model(patterns, targets, batches, weights_delt):
-    delt_accs_train = []
-    delt_accs_val = []
+def train_model(patterns, targets, val_data, batches, W, V):
+    seq_accs_train = []
+    seq_accs_val = []
+    seq_mses_train = []
+    seq_mses_val = []
 
     for epoch in range(NMB_EPOCHS):
-        d_delt_epoch = 0
-
         for batch in batches:
             pattern_batch = batch[0]
             target_batch = batch[1]
 
-            # Delta rule
-            e_delt = delta_rule(
-                pattern_batch, target_batch, weights_delt[epoch, :])
+            # Forward Pass
+            H_in, H_out, O_in, O_out = forward(
+                pattern_batch, W[epoch, :], V[epoch, :])
 
-            # Calculate weight updates
-            if REMOVE_BIAS:
-                d_w_delt = ETA * np.dot(e_delt, pattern_batch.T).reshape(2,)
+            # Backward Pass
+            delta_h, delta_o = backward(
+                H_in, H_out, O_in, O_out, V[epoch, :], target_batch)
+
+            if epoch == 0:
+                dw = np.dot(delta_h, pattern_batch.T)
+                dv = np.dot(delta_o, H_out.T)
             else:
-                d_w_delt = ETA * np.dot(e_delt, pattern_batch.T).reshape(3,)
+                dw = (ALPHA * dw) - ((1 - ALPHA) *
+                                     np.dot(delta_h, pattern_batch.T))
+                dv = (ALPHA * dv) - ((1 - ALPHA) * np.dot(delta_o, H_out.T))
 
-            # Update weights
-            weights_delt[epoch, :] += d_w_delt
-            d_delt_epoch += np.sum(d_w_delt)
+            W[epoch, :] += ETA * dw
+            V[epoch, :] += ETA * dv
 
         # Compute accuracy on training and validation sets
-        delt_accuracy_train, delt_accuracy_val = comp_acc(
-            patterns, targets, weights_delt[epoch, :])
+        seq_acc_train, seq_acc_val = comp_acc(
+            patterns, targets, val_data, W[epoch, :], V[epoch, :])
+        seq_accs_train.append(seq_acc_train)
+        seq_accs_val.append(seq_acc_val)
 
-        delt_accs_train.append(delt_accuracy_train)
-        delt_accs_val.append(delt_accuracy_val)
+        # compute MSEs
+        seq_train_mse, seq_val_mse = comp_mses(
+            patterns, targets, val_data, W[epoch, :], V[epoch, :])
+        seq_mses_train.append(seq_train_mse)
+        seq_mses_val.append(seq_val_mse)
 
         if epoch < NMB_EPOCHS - 1:
-            weights_delt[epoch + 1, :] = weights_delt[epoch, :]
+            W[epoch + 1, :] = W[epoch, :]
+            V[epoch + 1, :] = V[epoch, :]
 
-    return delt_accs_train, delt_accs_val
+    return [seq_accs_train, seq_accs_val], [seq_mses_train, seq_mses_val]
 
 
-main()
+# two_layer_perceptron()
+function_approx()
