@@ -162,3 +162,4 @@ cython_debug/
 acc.py
 
 deprecated/
+res_func_approx.txt
