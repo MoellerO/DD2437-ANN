@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from scipy.signal import savgol_filter
+import math
 
 
 def generate_data(n=6):
@@ -92,14 +93,14 @@ def plt_data(patterns, targets, val_data):
 
     plt.subplot(1, 3, 1)
     plt.scatter(patterns_A[0, :], patterns_A[1, :],
-                s=2, label='Class A', color="blue")
+                s=12, label='Class A', color="blue")
     plt.scatter(patterns_B[0, :], patterns_B[1, :],
-                s=2, label='Class B', color="red")
+                s=12, label='Class B', color="red")
     if val_data != None:
         plt.scatter(val_patterns_A[0, :], val_patterns_A[1,
-                    :], s=12, label='Val Class A', marker='x', color="blue")
+                    :], s=22, label='Val Class A', marker='x', color="blue")
         plt.scatter(val_patterns_B[0, :], val_patterns_B[1,
-                    :], s=12, label='Val Class B', marker='x', color="red")
+                    :], s=22, label='Val Class B', marker='x', color="red")
         # plt.legend()
 
 
@@ -138,7 +139,25 @@ def plt_accs(accs, batch_accs):
     plt.legend()
 
 
-def plt_mses(mse, mse_batch):
+def find_convergence_epoch(mse_values):
+    """
+    Finds the epoch where the MSE has converged.
+
+    Args:
+        mse_values (list): A list of MSE values for each epoch.
+
+    Returns:
+        int: The index of the epoch where the MSE has converged.
+    """
+    prev_mse = float('inf')
+    for i, mse in enumerate(mse_values):
+        if i > 0 and np.abs(mse - prev_mse) <= 1e-5:
+            return i
+        prev_mse = mse
+    return -1  # MSE did not converge
+
+
+def plt_mses(mse, mse_batch, is_gaus=False):
     sav_window_length = 7
     sav_polyorder = 2
 
@@ -156,22 +175,29 @@ def plt_mses(mse, mse_batch):
     seq_val_smooth = savgol_filter(
         seq_val, sav_window_length, sav_polyorder)
 
-    plt.subplot(1, 3, 3)
+    if is_gaus == False:
+        plt.subplot(1, 3, 3)
+
     plt.plot(seq_smooth, label='seq (smoothed)', color='blue')
     if mse_batch != None:
         plt.plot(batch_smooth, label='batch (smoothed)', color='red')
     if PLOT_VAL:
         plt.plot(seq_val_smooth, label='seq-val (smoothed)',
                  color='blue', linestyle='--', alpha=0.25)
-        plt.plot(batch_val_smooth, label='batch-val (smoothed)',
-                 color='red', linestyle='--', alpha=0.25)
+        if mse_batch != None:
+            plt.plot(batch_val_smooth, label='batch-val (smoothed)',
+                     color='red', linestyle='--', alpha=0.25)
+    print("Train MSE:", seq[-1])
+    print("Validation MSE:", seq_val[-1])
+    conv_epoch = find_convergence_epoch(seq)
+    print("Converged at Epoch:", conv_epoch)
 
     plt.title("MSE")
 
     plt.legend()
 
 
-def plot_gaussian(i, patterns, targets, seq_model):
+def plot_gaussian(i, patterns, targets, val_data, seq_model):
     W, V, accs, mses = seq_model
 
     x_test = np.linspace(-5, 5, GRID_SIZE)
@@ -194,6 +220,7 @@ def plot_gaussian(i, patterns, targets, seq_model):
     z = z_delt.reshape((GRID_SIZE, GRID_SIZE))
 
     plt.clf()
+
     fig = plt.gcf()
     ax = fig.add_subplot(111, projection='3d')
     ax.plot_surface(x, y, z, cmap='viridis', linewidth=0)
@@ -202,7 +229,8 @@ def plot_gaussian(i, patterns, targets, seq_model):
 
 def plot_decision_boundary(i, patterns, targets, val_data, seq_model, batch_model):
 
-    x1, x2 = np.meshgrid(np.linspace(-10, 10, 100), np.linspace(-10, 10, 100))
+    x1, x2 = np.meshgrid(np.linspace(-5, 5, 1000),
+                         np.linspace(-5, 5, 1000))
 
     X = np.vstack((x1.ravel(), x2.ravel(), np.ones_like(x1.ravel())))
 
@@ -230,7 +258,7 @@ def plot_decision_boundary(i, patterns, targets, val_data, seq_model, batch_mode
     plt_mses(mses, mses_batch)
 
     plt.subplot(1, 3, 1)
-    plt.scatter(0, 0, marker='x', s=100, color='red')
+    # plt.scatter(0, 0, marker='x', s=100, color='red')
     plt.contourf(x1, x2, z_delt, levels=[-100, 0, 100],
                  colors=['blue', 'red'], alpha=0.1)
     plt.contour(x1, x2, z_delt, levels=[0], colors=[
@@ -448,33 +476,6 @@ def backward(H_in, H_out, O_in, O_out, V, targets):
     return delta_h, delta_o
 
 
-# Constants - Data Gen
-N = 100
-mA = [1.0, 0.3]  # mean class A
-mB = [0.0, -0.1]  # mean class B
-sigmaA = 0.2
-sigmaB = 0.3
-REMOVE_A = 0.
-REMOVE_B = 0.
-REMOVE_POS = 0.2
-REMOVE_NEG = 0.8
-SPLITTED_A = True
-REMOVE_DATA = True
-PLOT_VAL = False
-
-
-# Constants - Training
-NMB_NODES = 16
-NMB_EPOCHS = 100
-ETA = 0.001
-BATCH_SIZE = 900
-ALPHA = 0.9
-
-# Constants - other
-ANIMATE = True
-GRID_SIZE = 30
-
-
 def gaussian(xy):
     return np.exp(-(xy[0]**2 + xy[1]**2) / 10) - 0.5
 
@@ -485,8 +486,6 @@ def generate_gauss_data(min=-5, max=5):
     z = gaussian(xy)
     x = xy[0]
     y = xy[1]
-
-    # plot_gaussian(x, y, z)
 
     x = x.reshape((GRID_SIZE * GRID_SIZE, 1))
     y = y.reshape((GRID_SIZE * GRID_SIZE, 1))
@@ -501,8 +500,16 @@ def generate_gauss_data(min=-5, max=5):
     return patterns[p].T, targets[p].T
 
 
-def function_approx():
-    patterns, targets = generate_gauss_data()
+def function_approx(train_ratio=0.8):
+    print(
+        f"NMB_NODES = {NMB_NODES}; NMB_EPOCHS = {NMB_EPOCHS}; ETA = {ETA}; BATCH_SIZE = {BATCH_SIZE}; ALPHA = {ALPHA}")
+    all_patterns, all_targets = generate_gauss_data()
+    num_train = int(len(all_targets) * train_ratio)
+    patterns = all_patterns[:, : num_train]
+    targets = all_targets[:num_train]
+    # val_patterns = all_patterns[:, num_train:]
+    # val_targets = all_targets[num_train:]
+    val_data = [all_patterns, all_targets]  # ! use all data as val data here
     # Initialize weights
     W = np.zeros((NMB_EPOCHS, NMB_NODES, 3))
     W[0, :] = np.random.normal(size=(NMB_NODES, 3))
@@ -512,18 +519,20 @@ def function_approx():
     # Train and validate the model using sequential mode (if batchsize == 1)
     seq_batches = create_batches(BATCH_SIZE, patterns, targets)
     seq_accs, seq_mses = train_model(
-        patterns, targets, None, seq_batches, W, V)
+        patterns, targets, val_data, seq_batches, W, V)
     seq_model = (W, V, seq_accs, seq_mses)
 
     # Plot the decision boundary
     if ANIMATE:
         ani = FuncAnimation(plt.gcf(), plot_gaussian,
-                            frames=NMB_EPOCHS, repeat=False, fargs=(patterns, targets, seq_model))
+                            frames=NMB_EPOCHS, repeat=False, fargs=(patterns, targets, val_data, seq_model))
         plt.gcf().canvas.mpl_connect(ani, on_close)
     else:
-        plot_gaussian(NMB_EPOCHS - 1, patterns,
-                      targets, seq_model)
+        plot_gaussian(NMB_EPOCHS - 1, patterns, targets, val_data, seq_model)
 
+    plt.show()
+
+    plt_mses(seq_mses, None, True)
     plt.show()
 
 
@@ -531,8 +540,13 @@ def two_layer_perceptron():
     # Generate data
     if SPLITTED_A:
         patterns, targets = generate_splitted_data(n=N)
+        val_patterns, val_targets = generate_splitted_data(n=100)
+        val_data = [val_patterns, val_targets]
+
     else:
         patterns, targets = generate_data(n=N)
+        val_patterns, val_targets = generate_data(n=100)
+        val_data = [val_patterns, val_targets]
 
     # Preprocessing
     if REMOVE_DATA:
@@ -636,5 +650,32 @@ def train_model(patterns, targets, val_data, batches, W, V):
     return [seq_accs_train, seq_accs_val], [seq_mses_train, seq_mses_val]
 
 
+# Constants - Data Gen
+N = 100
+mA = [1.0, 0.3]  # mean class A
+mB = [0.0, -0.1]  # mean class B
+sigmaA = 0.2
+sigmaB = 0.3
+REMOVE_A = 0.
+REMOVE_B = 0.
+REMOVE_POS = 0.2
+REMOVE_NEG = 0.8
+SPLITTED_A = True
+REMOVE_DATA = False
+PLOT_VAL = True
+
+
+# Constants - Training
+NMB_NODES = 8
+NMB_EPOCHS = 2001
+ETA = 0.001
+BATCH_SIZE = 900
+ALPHA = 0.9
+
+# Constants - other
+ANIMATE = False
+GRID_SIZE = 30
+
+
 # two_layer_perceptron()
-function_approx()
+function_approx(train_ratio=0.8)
